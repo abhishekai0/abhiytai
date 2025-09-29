@@ -318,13 +318,13 @@
             <h3>How to use:</h3>
             <ol>
                 <li>Click the microphone button and allow microphone access when prompted</li>
-                <li>Say "Hey Abhi, play [song name]" clearly in English</li>
+                <li>Say " Abhi, play [song name]" clearly in English</li>
                 <li>The app will respond with voice feedback and play the song</li>
                 <li>Use play/pause button to control playback</li>
                 <li>Adjust volume using the slider</li>
                 <li>Close the player by clicking the × button</li>
-                <li>Say "Hey Abhi, add to playlist" to add current song to playlist</li>
-                <li>Say "Hey Abhi, show playlist" to view your playlist</li>
+                <li>Say " Abhi, add to playlist" to add current song to playlist</li>
+                <li>Say " Abhi, show playlist" to view your playlist</li>
             </ol>
             <p class="troubleshooting">Troubleshooting: Ensure you're using Chrome or Edge browser. Speak clearly and slowly. If voice not recognized, try with English accent. For Hindi songs, say the name in English. This requires a Spotify Premium account and a valid access token.</p>
         </div>
@@ -468,7 +468,7 @@
             }
 
             function processVoiceCommand(transcript) {
-                if (transcript.includes('hey abhi')) {
+                if (transcript.includes(' abhi')) {
                     if (transcript.includes('play')) {
                         const songStartIndex = transcript.indexOf('play') + 4;
                         let songName = transcript.substring(songStartIndex).trim();
@@ -506,7 +506,7 @@
                     }
                 } else {
                     updateCommandText("Please start with 'Hey Abhi'");
-                    speakText("Please start with Hey Abhi");
+                    speakText("Please start with  Abhi");
                 }
             }
 
