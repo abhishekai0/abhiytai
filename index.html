@@ -179,6 +179,51 @@
             margin: 1rem 0;
         }
         
+        .playlist-section {
+            margin-top: 2rem;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1.5rem;
+            border-radius: 15px;
+            text-align: left;
+            display: none;
+        }
+        
+        .playlist-section.active {
+            display: block;
+        }
+        
+        .playlist-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .playlist-title {
+            font-size: 1.3rem;
+            font-weight: bold;
+        }
+        
+        .playlist-items {
+            list-style-type: none;
+        }
+        
+        .playlist-item {
+            padding: 0.8rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .playlist-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .playlist-item.active {
+            background: rgba(255, 255, 255, 0.2);
+            font-weight: bold;
+        }
+        
         .instructions {
             margin-top: 2rem;
             background: rgba(255, 255, 255, 0.1);
@@ -219,7 +264,7 @@
                 font-size: 2rem;
             }
             
-            .voice-command-section, .miniplayer {
+            .voice-command-section, .miniplayer, .playlist-section {
                 padding: 1.5rem;
             }
         }
@@ -229,7 +274,7 @@
     <div class="container">
         <header>
             <h1>Abhi Music Player</h1>
-            <p class="subtitle">Voice-controlled YouTube music player</p>
+            <p class="subtitle">Voice-controlled  music player</p>
         </header>
         
         <div class="voice-command-section">
@@ -252,12 +297,25 @@
                 <iframe id="youtubePlayer" src="" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
             </div>
             <div class="controls">
-                <button id="playPauseButton" class="control-button">⏯</button>
+                <button id="prevButton" class="control-button">⏮</button>
+                <button id="playPauseButton" class="control-button">⏸</button>
+                <button id="nextButton" class="control-button">⏭</button>
                 <div class="volume-control">
+                    <span>🔊</span>
                     <input type="range" id="volumeSlider" min="0" max="100" value="100">
                 </div>
             </div>
             <p id="nowPlayingText">Song will appear here</p>
+        </div>
+        
+        <div id="playlistSection" class="playlist-section">
+            <div class="playlist-header">
+                <div class="playlist-title">Playlist</div>
+                <button id="closePlaylistButton" class="close-button">×</button>
+            </div>
+            <ul id="playlistItems" class="playlist-items">
+                <!-- Playlist items will be added here dynamically -->
+            </ul>
         </div>
         
         <div class="instructions">
@@ -269,6 +327,8 @@
                 <li>Use play/pause button to control playback</li>
                 <li>Adjust volume using the slider</li>
                 <li>Close the player by clicking the × button</li>
+                <li>Say "Hey Abhi, add to playlist" to add current song to playlist</li>
+                <li>Say "Hey Abhi, show playlist" to view your playlist</li>
             </ol>
             <p class="troubleshooting">Troubleshooting: Ensure you're using Chrome or Edge browser. Speak clearly and slowly. If voice not recognized, try with English accent. For Hindi songs, say the name in English.</p>
         </div>
@@ -288,6 +348,8 @@
         let player;
         let isPlaying = false;
         let speechSynth = window.speechSynthesis;
+        let playlist = [];
+        let currentSongIndex = -1;
 
         function speakText(text, lang = 'en-US') {
             if (speechSynth) {
@@ -313,6 +375,11 @@
         function onPlayerStateChange(event) {
             isPlaying = event.data === YT.PlayerState.PLAYING;
             updatePlayPauseButton();
+            
+            // Auto-play next song when current ends
+            if (event.data === YT.PlayerState.ENDED && playlist.length > 0) {
+                playNextSong();
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -322,8 +389,13 @@
             const youtubePlayer = document.getElementById('youtubePlayer');
             const closeButton = document.getElementById('closeButton');
             const playPauseButton = document.getElementById('playPauseButton');
+            const prevButton = document.getElementById('prevButton');
+            const nextButton = document.getElementById('nextButton');
             const volumeSlider = document.getElementById('volumeSlider');
             const nowPlayingText = document.getElementById('nowPlayingText');
+            const playlistSection = document.getElementById('playlistSection');
+            const playlistItems = document.getElementById('playlistItems');
+            const closePlaylistButton = document.getElementById('closePlaylistButton');
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             let recognition;
@@ -338,7 +410,7 @@
                 recognition = new SpeechRecognition();
                 recognition.continuous = false;
                 recognition.interimResults = false;
-                recognition.lang = 'en-US'; // Keep en-US for English commands, but can change to 'hi-IN' if needed
+                recognition.lang = 'en-US';
                 setupRecognitionEvents();
                 return true;
             }
@@ -375,10 +447,9 @@
             function processVoiceCommand(transcript) {
                 if (transcript.includes('hey abhi')) {
                     if (transcript.includes('play')) {
-                        const songStartIndex = transcript.indexOf('play') + 4; // Changed to +4 to account for 'play'
+                        const songStartIndex = transcript.indexOf('play') + 4;
                         let songName = transcript.substring(songStartIndex).trim();
-                        // Improved parsing: remove any extra words if present
-                        songName = songName.replace(/by.*/i, '').trim(); // Remove 'by artist' if said
+                        songName = songName.replace(/by.*/i, '').trim();
                         if (songName) {
                             playSong(songName);
                             speakText(`Playing ${songName}`);
@@ -395,9 +466,21 @@
                     } else if (transcript.includes('stop')) {
                         stopSong();
                         speakText("Stopping");
+                    } else if (transcript.includes('add to playlist') || transcript.includes('save this song')) {
+                        addToPlaylist();
+                        speakText("Added to playlist");
+                    } else if (transcript.includes('show playlist') || transcript.includes('view playlist')) {
+                        showPlaylist();
+                        speakText("Showing playlist");
+                    } else if (transcript.includes('next')) {
+                        playNextSong();
+                        speakText("Playing next song");
+                    } else if (transcript.includes('previous') || transcript.includes('back')) {
+                        playPreviousSong();
+                        speakText("Playing previous song");
                     } else {
-                        updateCommandText("Valid commands: play [song], pause, resume, stop");
-                        speakText("Valid commands: play song, pause, resume, stop");
+                        updateCommandText("Valid commands: play [song], pause, resume, stop, add to playlist, show playlist, next, previous");
+                        speakText("Valid commands: play song, pause, resume, stop, add to playlist, show playlist, next, previous");
                     }
                 } else {
                     updateCommandText("Please start with 'Hey Abhi'");
@@ -413,10 +496,69 @@
                     nowPlayingText.textContent = `Playing: ${songName}`;
                     isPlaying = true;
                     updatePlayPauseButton();
+                    
+                    // Add to playlist if not already there
+                    if (!playlist.some(item => item.name === songName)) {
+                        playlist.push({ name: songName, query: searchQuery });
+                        updatePlaylistDisplay();
+                    }
+                    currentSongIndex = playlist.findIndex(item => item.name === songName);
                 } catch (error) {
                     updateCommandText(`Error playing song: ${error.message}`);
                     speakText("Error playing song");
                 }
+            }
+
+            function playNextSong() {
+                if (playlist.length > 0) {
+                    currentSongIndex = (currentSongIndex + 1) % playlist.length;
+                    const nextSong = playlist[currentSongIndex];
+                    youtubePlayer.src = `https://www.youtube.com/embed?listType=search&list=${nextSong.query}&autoplay=1`;
+                    nowPlayingText.textContent = `Playing: ${nextSong.name}`;
+                    updatePlaylistDisplay();
+                }
+            }
+
+            function playPreviousSong() {
+                if (playlist.length > 0) {
+                    currentSongIndex = (currentSongIndex - 1 + playlist.length) % playlist.length;
+                    const prevSong = playlist[currentSongIndex];
+                    youtubePlayer.src = `https://www.youtube.com/embed?listType=search&list=${prevSong.query}&autoplay=1`;
+                    nowPlayingText.textContent = `Playing: ${prevSong.name}`;
+                    updatePlaylistDisplay();
+                }
+            }
+
+            function addToPlaylist() {
+                const currentSong = nowPlayingText.textContent.replace('Playing: ', '');
+                if (currentSong && currentSong !== 'Song will appear here' && 
+                    !playlist.some(item => item.name === currentSong)) {
+                    const searchQuery = encodeURIComponent(currentSong + ' song');
+                    playlist.push({ name: currentSong, query: searchQuery });
+                    updatePlaylistDisplay();
+                    updateCommandText(`Added "${currentSong}" to playlist`);
+                }
+            }
+
+            function showPlaylist() {
+                playlistSection.classList.add('active');
+            }
+
+            function updatePlaylistDisplay() {
+                playlistItems.innerHTML = '';
+                playlist.forEach((item, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'playlist-item';
+                    if (index === currentSongIndex) {
+                        li.classList.add('active');
+                    }
+                    li.textContent = item.name;
+                    li.addEventListener('click', () => {
+                        currentSongIndex = index;
+                        playSong(item.name);
+                    });
+                    playlistItems.appendChild(li);
+                });
             }
 
             function pauseSong() {
@@ -490,10 +632,17 @@
                 }
             });
 
+            prevButton.addEventListener('click', playPreviousSong);
+            nextButton.addEventListener('click', playNextSong);
+
             volumeSlider.addEventListener('input', () => {
                 if (player) {
                     player.setVolume(volumeSlider.value);
                 }
+            });
+
+            closePlaylistButton.addEventListener('click', () => {
+                playlistSection.classList.remove('active');
             });
 
             // Initialize
