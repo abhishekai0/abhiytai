@@ -146,23 +146,19 @@
             background: rgba(255, 255, 255, 0.2);
         }
         
-        .video-container {
+        .album-container {
             position: relative;
             width: 100%;
-            padding-bottom: 56.25%;
-            height: 0;
             overflow: hidden;
             border-radius: 10px;
             margin-bottom: 1rem;
         }
         
-        .video-container iframe {
-            position: absolute;
-            top: 0;
-            left: 0;
+        .album-art {
             width: 100%;
-            height: 100%;
-            border: none;
+            aspect-ratio: 1 / 1;
+            object-fit: cover;
+            border-radius: 10px;
         }
         
         .controls {
@@ -274,7 +270,7 @@
     <div class="container">
         <header>
             <h1>Abhi Music Player</h1>
-            <p class="subtitle">Voice-controlled  music player</p>
+            <p class="subtitle">Voice-controlled music player</p>
         </header>
         
         <div class="voice-command-section">
@@ -293,8 +289,8 @@
                 <div class="player-title">Now Playing</div>
                 <button id="closeButton" class="close-button">×</button>
             </div>
-            <div class="video-container">
-                <iframe id="youtubePlayer" src="" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            <div class="album-container">
+                <img id="albumArt" class="album-art" src="" alt="Album Art">
             </div>
             <div class="controls">
                 <button id="prevButton" class="control-button">⏮</button>
@@ -330,22 +326,36 @@
                 <li>Say "Hey Abhi, add to playlist" to add current song to playlist</li>
                 <li>Say "Hey Abhi, show playlist" to view your playlist</li>
             </ol>
-            <p class="troubleshooting">Troubleshooting: Ensure you're using Chrome or Edge browser. Speak clearly and slowly. If voice not recognized, try with English accent. For Hindi songs, say the name in English.</p>
+            <p class="troubleshooting">Troubleshooting: Ensure you're using Chrome or Edge browser. Speak clearly and slowly. If voice not recognized, try with English accent. For Hindi songs, say the name in English. This requires a Spotify Premium account and a valid access token.</p>
         </div>
         
         <footer>
-            <p>Abhi Music Player &copy; 2025 | Voice-controlled YouTube integration</p>
+            <p>Abhi Music Player &copy; 2025 | Voice-controlled Spotify integration</p>
         </footer>
     </div>
 
+    <script src="https://sdk.scdn.co/spotify-player.js"></script>
     <script>
-        // Load YouTube IFrame Player API
-        const tag = document.createElement('script');
-        tag.src = "https://www.youtube.com/iframe_api";
-        const firstScriptTag = document.getElementsByTagName('script')[0];
-        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+        // Spotify token - replace with your own access token
+        const token = 'YOUR_ACCESS_TOKEN_HERE'; // See https://developer.spotify.com/documentation/web-api/concepts/authorization
+
+        async function fetchWebApi(endpoint, method, body) {
+          const res = await fetch(`https://api.spotify.com/${endpoint}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            method,
+            body: JSON.stringify(body)
+          });
+          if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.error.message || 'API request failed');
+          }
+          return await res.json();
+        }
 
         let player;
+        let deviceId;
         let isPlaying = false;
         let speechSynth = window.speechSynthesis;
         let playlist = [];
@@ -359,34 +369,47 @@
             }
         }
 
-        function onYouTubeIframeAPIReady() {
-            player = new YT.Player('youtubePlayer', {
-                events: {
-                    'onReady': onPlayerReady,
-                    'onStateChange': onPlayerStateChange
+        window.onSpotifyWebPlaybackSDKReady = () => {
+            player = new Spotify.Player({
+                name: 'Abhi Music Player',
+                getOAuthToken: cb => { cb(token); },
+                volume: 1.0
+            });
+
+            player.addListener('ready', ({ device_id }) => {
+                console.log('Ready with Device ID', device_id);
+                deviceId = device_id;
+            });
+
+            player.addListener('not_ready', ({ device_id }) => {
+                console.log('Device ID has gone offline', device_id);
+            });
+
+            player.addListener('player_state_changed', state => {
+                if (!state) {
+                    isPlaying = false;
+                    updatePlayPauseButton();
+                    return;
+                }
+
+                isPlaying = !state.paused;
+                updatePlayPauseButton();
+
+                const track = state.track_window.current_track;
+                if (track) {
+                    const fullName = `${track.name} by ${track.artists.map(a => a.name).join(', ')}`;
+                    updateNowPlaying(fullName);
+                    document.getElementById('albumArt').src = track.album.images[0]?.url || '';
                 }
             });
-        }
 
-        function onPlayerReady(event) {
-            event.target.setVolume(100);
-        }
-
-        function onPlayerStateChange(event) {
-            isPlaying = event.data === YT.PlayerState.PLAYING;
-            updatePlayPauseButton();
-            
-            // Auto-play next song when current ends
-            if (event.data === YT.PlayerState.ENDED && playlist.length > 0) {
-                playNextSong();
-            }
-        }
+            player.connect();
+        };
 
         document.addEventListener('DOMContentLoaded', function() {
             const micButton = document.getElementById('micButton');
             const commandText = document.getElementById('commandText');
             const miniplayer = document.getElementById('miniplayer');
-            const youtubePlayer = document.getElementById('youtubePlayer');
             const closeButton = document.getElementById('closeButton');
             const playPauseButton = document.getElementById('playPauseButton');
             const prevButton = document.getElementById('prevButton');
@@ -449,7 +472,6 @@
                     if (transcript.includes('play')) {
                         const songStartIndex = transcript.indexOf('play') + 4;
                         let songName = transcript.substring(songStartIndex).trim();
-                        songName = songName.replace(/by.*/i, '').trim();
                         if (songName) {
                             playSong(songName);
                             speakText(`Playing ${songName}`);
@@ -488,55 +510,66 @@
                 }
             }
 
-            function playSong(songName) {
+            async function playSong(songName) {
+                if (!deviceId) {
+                    updateCommandText("Player not ready. Please try again shortly.");
+                    speakText("Player not ready");
+                    return;
+                }
                 try {
                     miniplayer.classList.add('active');
-                    const searchQuery = encodeURIComponent(songName + ' song');
-                    youtubePlayer.src = `https://www.youtube.com/embed?listType=search&list=${searchQuery}&autoplay=1`;
-                    nowPlayingText.textContent = `Playing: ${songName}`;
-                    isPlaying = true;
-                    updatePlayPauseButton();
-                    
-                    // Add to playlist if not already there
-                    if (!playlist.some(item => item.name === songName)) {
-                        playlist.push({ name: songName, query: searchQuery });
+                    const searchRes = await fetchWebApi(`v1/search?q=${encodeURIComponent(songName)}&type=track&limit=1`, 'GET');
+                    if (!searchRes.tracks?.items?.length) {
+                        throw new Error('No track found');
+                    }
+                    const track = searchRes.tracks.items[0];
+                    const uri = track.uri;
+                    const fullName = `${track.name} by ${track.artists.map(a => a.name).join(', ')}`;
+
+                    if (!playlist.some(item => item.uri === uri)) {
+                        playlist.push({ name: fullName, uri: uri });
                         updatePlaylistDisplay();
                     }
-                    currentSongIndex = playlist.findIndex(item => item.name === songName);
+                    currentSongIndex = playlist.findIndex(item => item.uri === uri);
+                    await playCurrentPlaylist();
+                    updateNowPlaying(fullName);
                 } catch (error) {
                     updateCommandText(`Error playing song: ${error.message}`);
                     speakText("Error playing song");
                 }
             }
 
-            function playNextSong() {
-                if (playlist.length > 0) {
-                    currentSongIndex = (currentSongIndex + 1) % playlist.length;
-                    const nextSong = playlist[currentSongIndex];
-                    youtubePlayer.src = `https://www.youtube.com/embed?listType=search&list=${nextSong.query}&autoplay=1`;
-                    nowPlayingText.textContent = `Playing: ${nextSong.name}`;
-                    updatePlaylistDisplay();
+            async function playCurrentPlaylist() {
+                const uris = playlist.slice(currentSongIndex).map(item => item.uri);
+                if (uris.length > 0) {
+                    await fetchWebApi(`v1/me/player/play?device_id=${deviceId}`, 'PUT', { uris: uris });
                 }
+                updatePlaylistDisplay();
+            }
+
+            function playNextSong() {
+                player.nextTrack();
             }
 
             function playPreviousSong() {
-                if (playlist.length > 0) {
-                    currentSongIndex = (currentSongIndex - 1 + playlist.length) % playlist.length;
-                    const prevSong = playlist[currentSongIndex];
-                    youtubePlayer.src = `https://www.youtube.com/embed?listType=search&list=${prevSong.query}&autoplay=1`;
-                    nowPlayingText.textContent = `Playing: ${prevSong.name}`;
-                    updatePlaylistDisplay();
-                }
+                player.previousTrack();
             }
 
-            function addToPlaylist() {
-                const currentSong = nowPlayingText.textContent.replace('Playing: ', '');
-                if (currentSong && currentSong !== 'Song will appear here' && 
-                    !playlist.some(item => item.name === currentSong)) {
-                    const searchQuery = encodeURIComponent(currentSong + ' song');
-                    playlist.push({ name: currentSong, query: searchQuery });
-                    updatePlaylistDisplay();
-                    updateCommandText(`Added "${currentSong}" to playlist`);
+            async function addToPlaylist() {
+                const state = await player.getCurrentState();
+                if (state && state.track_window.current_track) {
+                    const track = state.track_window.current_track;
+                    const uri = track.uri;
+                    const fullName = `${track.name} by ${track.artists.map(a => a.name).join(', ')}`;
+                    if (!playlist.some(item => item.uri === uri)) {
+                        playlist.push({ name: fullName, uri: uri });
+                        updatePlaylistDisplay();
+                        updateCommandText(`Added "${fullName}" to playlist`);
+                    } else {
+                        updateCommandText(`${fullName} is already in playlist`);
+                    }
+                } else {
+                    updateCommandText("No song is currently playing");
                 }
             }
 
@@ -553,9 +586,9 @@
                         li.classList.add('active');
                     }
                     li.textContent = item.name;
-                    li.addEventListener('click', () => {
+                    li.addEventListener('click', async () => {
                         currentSongIndex = index;
-                        playSong(item.name);
+                        await playCurrentPlaylist();
                     });
                     playlistItems.appendChild(li);
                 });
@@ -563,32 +596,29 @@
 
             function pauseSong() {
                 if (player && isPlaying) {
-                    player.pauseVideo();
-                    isPlaying = false;
-                    updatePlayPauseButton();
+                    player.pause();
                 }
             }
 
             function resumeSong() {
                 if (player && !isPlaying) {
-                    player.playVideo();
-                    isPlaying = true;
-                    updatePlayPauseButton();
+                    player.resume();
                 }
             }
 
             function stopSong() {
                 if (player) {
-                    player.stopVideo();
+                    player.pause();
                     miniplayer.classList.remove('active');
-                    youtubePlayer.src = "";
-                    isPlaying = false;
-                    updatePlayPauseButton();
                 }
             }
 
             function updatePlayPauseButton() {
                 playPauseButton.textContent = isPlaying ? '⏸' : '▶';
+            }
+
+            function updateNowPlaying(text) {
+                nowPlayingText.textContent = `Playing: ${text}`;
             }
 
             function addDemoButton() {
@@ -625,10 +655,8 @@
             closeButton.addEventListener('click', stopSong);
 
             playPauseButton.addEventListener('click', () => {
-                if (isPlaying) {
-                    pauseSong();
-                } else {
-                    resumeSong();
+                if (player) {
+                    player.togglePlay();
                 }
             });
 
@@ -637,7 +665,7 @@
 
             volumeSlider.addEventListener('input', () => {
                 if (player) {
-                    player.setVolume(volumeSlider.value);
+                    player.setVolume(volumeSlider.value / 100);
                 }
             });
 
